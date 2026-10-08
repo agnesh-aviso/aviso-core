@@ -10,6 +10,48 @@ from gbm_apis.framework.mixins import AvisoCompatibilityMixin
 
 logger = logging.getLogger('gnana.%s' % __name__)
 
+
+def iter_deal_results_json(value):
+    """Serialize one period's (or timestamp's) value, streaming its deals.
+
+    Carries the same data as ``json.dumps(value)``; what differs is only
+    insignificant whitespace and the position of ``results``, which moves to the
+    end of the object. The point is that no string larger than a single deal is
+    ever built -- the ``json.dumps`` call this replaces held the whole object
+    graph *and* a full serialized copy of it at the same time.
+
+    Each deal still goes through ``json.dumps``, so serialization stays on the C
+    encoder: 26.7s against the single call's 23.0s on a 3.8GB tenant payload.
+    ``JSONEncoder().iterencode`` also avoids the big string, but its public form
+    runs the pure-Python encoder (only ``dumps``/``encode`` take the C path) and
+    measured 105.8s on the same data.
+    """
+    # File-list modes return a plain list -- small payload, serialize as before.
+    # The isinstance check on results also stops an unexpected shape from
+    # raising once the first byte is out, when the 200 and headers are already
+    # on the wire and the client can only see a truncated body.
+    deal_results = value.get('results') if isinstance(value, dict) else None
+    if not isinstance(deal_results, dict):
+        yield '%s\n' % json.dumps(value)
+        return
+
+    # Stream deal results one at a time to avoid a single giant json.dumps string
+    yield '{\n'
+    for key, val in value.items():
+        if key == 'results':
+            continue
+        yield '%s: %s,\n' % (json.dumps(str(key)), json.dumps(val))
+    yield '"results": {\n'
+    for i, (deal_id, deal_data) in enumerate(deal_results.items()):
+        if i:
+            yield ','
+        # str(): json.dumps coerces non-string keys, and without it a
+        # non-string id emits `1: {...}`, which is not valid JSON.
+        yield '%s: %s\n' % (json.dumps(str(deal_id)), json.dumps(deal_data))
+    yield '}\n'
+    yield '}\n'
+
+
 @method_decorator(csrf_exempt, name='dispatch')
 class DealsResultsAPIView(AvisoCompatibilityMixin, AvisoView):
     """
@@ -111,11 +153,14 @@ class DealsResultsAPIView(AvisoCompatibilityMixin, AvisoView):
             if x:
                 yield ','
             yield '%s:\n' % json.dumps(period)
-            yield '%s\n' % json.dumps(deals_results_by_period([period], include_uip=include_uip, node=node,
-                                                              get_results_from_as_of=get_results_from_as_of,
-                                                              fields=fields,
-                                                              return_files_list=return_files_list,
-                                                              return_chipotle_files_list=return_chipotle_files_list)[period])
+            period_data = deals_results_by_period([period], include_uip=include_uip, node=node,
+                                                  get_results_from_as_of=get_results_from_as_of,
+                                                  fields=fields,
+                                                  return_files_list=return_files_list,
+                                                  return_chipotle_files_list=return_chipotle_files_list)[period]
+            yield from iter_deal_results_json(period_data)
+            # Release before the next period is fetched.
+            del period_data
         yield '}\n'
 
     def yield_timestamp_results(self, period, timestamps, include_uip, node, get_results_from_as_of=0, fields=[],
@@ -127,13 +172,16 @@ class DealsResultsAPIView(AvisoCompatibilityMixin, AvisoView):
             if x:
                 yield ','
             yield '%s:\n' % json.dumps(str(timestamp))
-            yield '%s\n' % json.dumps(deals_results_by_timestamp(period, [timestamp], include_uip=include_uip,
-                                                                 node=node,
-                                                                 get_results_from_as_of=get_results_from_as_of,
-                                                                 fields=fields, opp_ids=opp_ids,
-                                                                 changed_deals=changed_deals,
-                                                                 force_uip_and_hierarchy=force_uip_and_hierarchy,
-                                                                 allow_live=allow_live,
-                                                                 return_files_list=return_files_list,
-                                                                 return_chipotle_files_list=return_chipotle_files_list)[timestamp])
+            timestamp_data = deals_results_by_timestamp(period, [timestamp], include_uip=include_uip,
+                                                        node=node,
+                                                        get_results_from_as_of=get_results_from_as_of,
+                                                        fields=fields, opp_ids=opp_ids,
+                                                        changed_deals=changed_deals,
+                                                        force_uip_and_hierarchy=force_uip_and_hierarchy,
+                                                        allow_live=allow_live,
+                                                        return_files_list=return_files_list,
+                                                        return_chipotle_files_list=return_chipotle_files_list)[timestamp]
+            yield from iter_deal_results_json(timestamp_data)
+            # Release before the next timestamp is fetched.
+            del timestamp_data
         yield '}\n'
