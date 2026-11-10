@@ -4,6 +4,7 @@ from gbm_apis.api.data_load import DataLoadAPIView
 from gbm_apis.api.deals_results import DealsResultsAPIView
 from gbm_apis.api.forecast_results import ForecastResultsAPIView
 from gbm_apis.api.health import HealthCheckView
+from gbm_apis.api.hier_metadata import HierarchyMetadataAPIView
 
 app_name = 'gbm_apis'
 
@@ -17,5 +18,7 @@ urlpatterns = [
     # No trailing slash required: the jobs call /gbm/forecast_results?period=... (as legacy), and a
     # slash-append redirect would be an extra hop for them.
     re_path(r'^forecast_results/?$', ForecastResultsAPIView.as_view(), name='forecast_results'),
+    # GET only (read-only checksum). The SDK calls /gbm/hier_metadata without a trailing slash.
+    re_path(r'^hier_metadata/?$', HierarchyMetadataAPIView.as_view(), name='hier_metadata'),
     path('health/', HealthCheckView.as_view(), name='health'),
 ]
