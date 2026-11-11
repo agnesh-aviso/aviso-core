@@ -5,6 +5,7 @@ from gbm_apis.api.deals_results import DealsResultsAPIView
 from gbm_apis.api.forecast_results import ForecastResultsAPIView
 from gbm_apis.api.health import HealthCheckView
 from gbm_apis.api.hier_metadata import HierarchyMetadataAPIView
+from gbm_apis.api.hier_sync import HierarchySyncAPIView
 
 app_name = 'gbm_apis'
 
@@ -20,5 +21,7 @@ urlpatterns = [
     re_path(r'^forecast_results/?$', ForecastResultsAPIView.as_view(), name='forecast_results'),
     # GET only (read-only checksum). The SDK calls /gbm/hier_metadata without a trailing slash.
     re_path(r'^hier_metadata/?$', HierarchyMetadataAPIView.as_view(), name='hier_metadata'),
+    # POST only. Rewrites the tenant's GBM hierarchy; the SDK calls /gbm/hier_sync without a trailing slash.
+    re_path(r'^hier_sync/?$', HierarchySyncAPIView.as_view(), name='hier_sync'),
     path('health/', HealthCheckView.as_view(), name='health'),
 ]

@@ -123,10 +123,15 @@ def test_url_resolves_with_and_without_trailing_slash(path):
     assert resolve(path).func.view_class is HierarchyMetadataAPIView
 
 
-@pytest.mark.parametrize("path", ["/gbm/hier_sync", "/gbm/hier_sync/", "/gbm/hier_metadatax", "/gbm/hier_metadata/x"])
-def test_hier_sync_and_lookalikes_are_not_routed(path):
+@pytest.mark.parametrize("path", ["/gbm/hier_metadatax", "/gbm/hier_metadata/x", "/gbm/xhier_metadata"])
+def test_lookalikes_are_not_routed(path):
     with pytest.raises(Resolver404):
         resolve(path)
+
+
+@pytest.mark.parametrize("path", ["/gbm/hier_sync", "/gbm/hier_sync/"])
+def test_hier_sync_is_a_separate_view(path):
+    assert resolve(path).func.view_class is not HierarchyMetadataAPIView
 
 
 # ============================================================================= service
