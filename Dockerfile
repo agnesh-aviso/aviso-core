@@ -37,20 +37,43 @@ LABEL maintainer="Engineering Team <engineering@aviso.com>" \
 # Create non-root user
 RUN adduser --disabled-password --gecos '' appuser
 
+# GIT_* identity: aviso.utils.fileUtils shells out to `git commit` for the tenant
+# config backup, which refuses to run without an author/committer. Set as env
+# vars rather than `git config --global` so there is no $HOME/.gitconfig to own
+# or keep in sync. CONFIG_REPO is under /home/appuser, not the legacy
+# /opt/gnana/config, because this container runs as non-root appuser. It is the
+# parent directory: the entrypoint clones one repo per stack beneath it.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     AVISO_APPS=aviso_core \
-    PATH="/home/appuser/.local/bin:$PATH"
+    PATH="/home/appuser/.local/bin:$PATH" \
+    GIT_AUTHOR_NAME="aviso-core" \
+    GIT_AUTHOR_EMAIL="gnana@aviso.com" \
+    GIT_COMMITTER_NAME="aviso-core" \
+    GIT_COMMITTER_EMAIL="gnana@aviso.com" \
+    CONFIG_REPO=/home/appuser/config \
+    GIT_ASKPASS=/usr/local/bin/git-askpass
 
 WORKDIR /app
 
-# Install runtime-only system libraries
+# Install runtime-only system libraries.
+# git: the tenant config backup in aviso.utils.fileUtils shells out to the git
+# binary. python:3.10-slim does not ship it, which is why config backups have
+# been failing since this service moved off the legacy python:3.6.5-jessie base
+# image. ca-certificates: required to clone the config repo over HTTPS.
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
        libpq5 \
        libmemcached11 \
+       git \
+       ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Feed the token to git over stdin rather than embedding it in the remote URL,
+# which would write it into .git/config and into any logged remote.
+RUN printf '#!/bin/sh\nexec echo "$CONFIG_REPO_TOKEN"\n' > /usr/local/bin/git-askpass \
+    && chmod 0755 /usr/local/bin/git-askpass
 
 # Copy installed Python packages from builder
 COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
@@ -62,7 +85,8 @@ COPY --chown=appuser:appuser . /app
 # by root, so the SDK package and its version file could not be written.
 RUN chmod +x /app/docker-entrypoint.sh \
     && mkdir -p /app/static \
-    && chown -R appuser:appuser /app
+    && mkdir -p "$CONFIG_REPO" \
+    && chown -R appuser:appuser /app "$CONFIG_REPO"
 
 USER appuser
 

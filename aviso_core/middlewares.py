@@ -26,9 +26,10 @@ ANONYMOUS_PATHS = {
 def _release(tenant_name):
     """Close whatever this thread opened while serving the request.
 
-    Reads thread_local directly: tenant_db and postgres_local_con are
-    properties that CREATE a connection when the thread has none, so touching
-    them here makes cleanup open the very things it is meant to close.
+    Reads thread_local directly: tenant_db, postgres_local_con and
+    stack_postgres_db are properties that CREATE a connection when the thread
+    has none, so touching them here makes cleanup open the very things it is
+    meant to close.
     """
     tl = getattr(tenant_holder, "thread_local", None)
     try:
@@ -40,6 +41,22 @@ def _release(tenant_name):
                 except Exception as e:
                     logger.info("Failed to close Postgres connection: %s", e)
                 del tl.postgres_local_con
+
+            # The tenant's microservice stack Postgres. Without this the
+            # connection survives the response and is reclaimed only by the
+            # next request's reset_context() on this worker -- one idle
+            # connection per gunicorn worker, for the worker's whole life.
+            stack_conn = getattr(tl, "stack_postgres_db", None)
+            if stack_conn is not None:
+                try:
+                    stack_conn.close()
+                except Exception as e:
+                    logger.info("Failed to close stack Postgres connection: %s", e)
+                del tl.stack_postgres_db
+                # Drop the marker too, so the next request rebuilds cleanly
+                # instead of comparing against a tenant whose connection is gone.
+                if hasattr(tl, "tenant_used_for_stack_pg_db"):
+                    del tl.tenant_used_for_stack_pg_db
 
             db_map = getattr(tl, "tenant_db_map", None)
             if db_map:

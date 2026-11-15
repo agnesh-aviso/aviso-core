@@ -17,6 +17,7 @@ import os
 import threading
 import time
 
+import psycopg2
 from aviso.settings import ADMIN_DOMAIN, microservices_user, sec_context
 from django.http import HttpResponse
 
@@ -29,7 +30,8 @@ logger = logging.getLogger('gnana.%s' % __name__)
 
 # Short on purpose: nothing tells this process that a token was revoked, so the
 # TTL is the whole revocation window, multiplied by the number of workers.
-TOKEN_CACHE_TTL = 60
+# Seconds; override with the TOKEN_CACHE_TTL environment variable.
+TOKEN_CACHE_TTL = int(os.environ.get('TOKEN_CACHE_TTL', 60))
 
 _service_user = None
 _service_user_lock = threading.Lock()
@@ -43,6 +45,42 @@ def unauthorized(message='Unauthorized'):
                         content_type='application/json')
 
 
+def _stack_db_urls():
+    """Each stack database this service is configured for, as (env name, url).
+
+    A stack's database is named <STACK>_PG_DB_CONNECTION_URL -- gbm1-ms is
+    GBM1_MS_PG_DB_CONNECTION_URL -- the same variables ConnectionFactory
+    reads. GBM_PG_DB_CONNECTION_URL itself names no stack and is left out.
+    """
+    suffix = '_PG_DB_CONNECTION_URL'
+    prefix = os.environ.get('STACK_DB_TYPE', 'gbm').upper()
+    return sorted((name, url) for name, url in os.environ.items()
+                  if name.startswith(prefix) and name.endswith(suffix)
+                  and name != prefix + suffix and url)
+
+
+def _find_token(auth_token):
+    """The token's tenants, from whichever stack database holds the token.
+
+    A bare token names no tenant, so there is no stack to resolve it from:
+    every stack is asked in turn. Tokens are stored per stack.
+    """
+    for _env_name, url in _stack_db_urls():
+        connection = psycopg2.connect(url, application_name='aviso-core')
+        try:
+            connection.set_session(readonly=True, autocommit=True)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    'select "tenant", "source_tenant" from "authorization_tokens" '
+                    'where "token" = %s', (auth_token,))
+                row = cursor.fetchone()
+        finally:
+            connection.close()
+        if row:
+            return {'tenant': row[0], 'source_tenant': row[1]}
+    return None
+
+
 def _resolve_token(auth_token):
     """Map an Access-Token to its tenant, cached in process to spare Postgres."""
     now = time.time()
@@ -51,17 +89,14 @@ def _resolve_token(auth_token):
         if cached and cached[1] > now:
             return cached[0]
 
-    from aviso.domainmodel.auth_tokens import AuthorizationToken
     try:
-        token_obj = AuthorizationToken.getByFieldValue('token', auth_token)
+        tenant_info = _find_token(auth_token)
     except Exception:
         logger.exception('Failed to look up the authorization token')
-        token_obj = None
-    if not token_obj:
+        tenant_info = None
+    if not tenant_info:
         return None
 
-    tenant_info = {'tenant': token_obj.tenant,
-                   'source_tenant': token_obj.source_tenant}
     with _token_cache_lock:
         _token_cache[auth_token] = (tenant_info, now + TOKEN_CACHE_TTL)
     return tenant_info

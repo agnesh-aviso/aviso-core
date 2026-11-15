@@ -34,3 +34,6 @@ node_modules/
 .idea/
 *.iml
 
+# Local credentials: the container gets its environment at run time, never
+# from a file baked into the image.
+.env

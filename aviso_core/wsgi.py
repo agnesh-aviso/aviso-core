@@ -1,6 +1,21 @@
 """
 WSGI config for aviso_core project.
 """
+# TODO: remove this whole shim. It exists only to drag the PyPI `pyschema==2.4.0`
+# -- Spotify's Avro library, Python 2 only, whose core does `from itertools
+# import izip` -- into Python 3. That package is no longer a dependency: Aviso's
+# real schema library is now vendored at aviso/utils/pyschema.py in
+# aviso-infrastructure, and the py-schema requirement has been dropped from
+# requirements.txt.
+#
+# Safe to leave in the meantime. The pyschema block below is guarded on
+# `submodule_search_locations`, which is non-None only for a package directory;
+# the vendored module is not even a top-level module, so find_spec("pyschema")
+# returns None and the block cannot execute. The itertools assignments are inert
+# attribute additions on the stdlib.
+#
+# Kept only until a deployed run confirms nothing else relied on the zipimport
+# patch below, which is NOT pyschema-specific and needs its own look.
 import itertools
 if not hasattr(itertools, "izip"):
     itertools.izip = zip

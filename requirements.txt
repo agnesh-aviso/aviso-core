@@ -1,6 +1,6 @@
 amqp==5.3.1
 asgiref==3.8.1
-aviso==0.1.15
+aviso==0.1.13
 billiard==4.2.1
 boto==2.49.0
 boto3==1.22.0
@@ -48,7 +48,8 @@ pydevd==3.3.0
 Pygments==2.19.1
 PyJWT==1.7.1
 pymongo==3.12.3
-pyschema==2.4.0
+# py-schema removed: Aviso's schema library is vendored in aviso-infrastructure
+# (aviso/utils/pyschema.py) and reaches this service through that dependency.
 pytest==8.4.0
 python-dateutil==2.8.2
 python-dotenv==1.1.0

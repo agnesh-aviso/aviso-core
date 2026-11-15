@@ -256,8 +256,6 @@ class Dataset(DSClass):
 
     @classmethod
     def get_from_micro(cls, name, stage=None, target='_data', full_config=True, get_cached=True, get_from_db=False):
-        etl_stage = sec_context.get_microservice_config('etl_data_service').get('sandbox')
-        gbm_stage = sec_context.get_microservice_config('gbm_service').get('sandbox')
         def get_ds_config(etl_ds_attrs, gbm_ds_attrs):
             ds_attrs = {}
             ds_attrs.update(etl_ds_attrs)
@@ -309,7 +307,12 @@ class Dataset(DSClass):
                 get_from_db = False
 
             if not get_from_db:
-                etl_key = ":".join([CNAME, sec_context.name, name,
+                # Only the shell/cache path needs the sandboxes. A tenant record read
+                # from a gbm stack database has no gbm_service entry, so tolerate its
+                # absence instead of failing before the DB path is even chosen.
+                etl_stage = (sec_context.get_microservice_config('etl_data_service') or {}).get('sandbox')
+                gbm_stage = (sec_context.get_microservice_config('gbm_service') or {}).get('sandbox')
+                etl_key =":".join([CNAME, sec_context.name, name,
                                     etl_stage if etl_stage else 'None', target, str(full_config),"etl"])
                 gbm_key = ":".join([CNAME, sec_context.name, name,
                                     gbm_stage if gbm_stage else 'None', target, str(full_config),"gbm"])

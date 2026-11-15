@@ -36,8 +36,19 @@ def _json(payload, status=200):
 
 
 def get_timezone(tenant_name=None):
-    tenant = Tenant.getByName(tenant_name) if tenant_name else sec_context.details
-    return tenant.get_config('forecast', 'timezone', DEFAULT_TIME_ZONE)
+    """The forecast timezone of the tenant this request is running as.
+
+    Tenant config is read from the stack of the context tenant, so it can only
+    be read for that tenant. Asking for another one would look for its config
+    in the context tenant's stack -- not found, or another tenant's rows -- so
+    a tenant_name that is not the context tenant is refused. To read another
+    tenant's timezone, enter NewSecContext for it first.
+    """
+    if tenant_name and tenant_name != sec_context.name:
+        raise ValueError(
+            'get_timezone("%s") called while running as "%s"; switch context '
+            'to the tenant before reading its config' % (tenant_name, sec_context.name))
+    return sec_context.details.get_config('forecast', 'timezone', DEFAULT_TIME_ZONE)
 
 
 class CSRFForm(View):
@@ -304,7 +315,13 @@ class Switch(View):
         request.session[TENANT_USERNAME] = request.session[LOGIN_USER_NAME]
         request.session[SWITCH_TYPE] = 'tenant'
         request.session.save()
-        return _json({'success': True, 'timezone': get_timezone(tenant.name)})
+        # Tenant config is read from the stack of the context tenant. This
+        # request is still running as the tenant being switched FROM, which may
+        # be on another stack, so read the new tenant's timezone as that tenant.
+        login_user_name, login_tenant_name = request.session['LOGIN_AS'].split('@', 1)
+        with NewSecContext(login_user_name, tenant.name, login_tenant_name):
+            timezone = get_timezone()
+        return _json({'success': True, 'timezone': timezone})
 
 
 class LoginSwitchByPassCall(LoginAjax, Switch):

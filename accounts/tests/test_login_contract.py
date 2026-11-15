@@ -8,7 +8,7 @@ import json
 import re
 from unittest import mock
 
-from django.test import Client, TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 
 from gbm_apis.framework.baseView import ValidationError as GnanaValidationError
 
@@ -92,7 +92,7 @@ class AnonymousAccessTest(TestCase):
         self.assertEqual(self.client.get('/no-such-path').status_code, 401)
 
 
-class LoginTest(TestCase):
+class LoginTest(SimpleTestCase):
 
     def _patch_backend(self, user):
         patcher = mock.patch(
@@ -118,6 +118,17 @@ class LoginTest(TestCase):
         self.addCleanup(app_user.stop)
         app_user.start()
 
+        # The lock check runs inside AuthenticationPostgresContext, which opens
+        # a real connection to the tenant's stack Postgres -- and reaches FM
+        # first to resolve the stack. psycopg2.connect is given no timeout, so
+        # off the VPN these tests block on it for as long as the OS allows
+        # rather than failing. SimpleTestCase promises no database, so stub it
+        # here; the test that asserts the scope patches it again itself.
+        auth_database = mock.patch(
+            'gbm_apis.framework.baseView.AuthenticationPostgresContext')
+        self.addCleanup(auth_database.stop)
+        auth_database.start()
+
     def test_rejects_username_without_tenant(self):
         response = self.client.post('/account/login',
                                     {'username': 'tester', 'password': 'x'})
@@ -139,6 +150,22 @@ class LoginTest(TestCase):
         session = self.client.session
         self.assertEqual(session['tenant.name'], 'administrative.domain')
         self.assertEqual(session['login.user.name'], 'tester')
+
+    def test_login_lock_check_uses_the_authentication_database_scope(self):
+        user = FakeUser()
+        self._patch_backend(user)
+        self._patch_form_lookups()
+
+        with mock.patch(
+                'gbm_apis.framework.baseView.AuthenticationPostgresContext'
+        ) as auth_database:
+            response = self.client.post(
+                '/account/login',
+                {'username': 'tester@administrative.domain',
+                 'password': 'secret'})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        auth_database.assert_called_once_with('administrative.domain')
 
     def test_rejects_a_tenant_user(self):
         """Only the admin domain gets a session; tenants use an Access-Token.

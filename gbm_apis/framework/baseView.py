@@ -7,11 +7,13 @@ from aviso.domainmodel.app import User
 from aviso.domainmodel.saml_idp import IdP
 from aviso.onelogin.saml import AuthRequest
 from aviso.framework.diagnostics import probe_util
-from aviso.framework import LoginUserContext, tracer, NewSecContext
+from aviso.framework import (AuthenticationPostgresContext, LoginUserContext,
+                             tracer, NewSecContext, TenantStackPostgresContext)
 from django.contrib.auth.forms import AuthenticationForm
 from aviso.settings import CNAME, event_context, sec_context, microservices_user, script_users
 from aviso.utils.stringUtils import html_escape
 from aviso.utils import is_true, queue_name, is_prod, GnanaError
+from django.http import HttpResponse, StreamingHttpResponse
 from django.views import View
 
 logger = logging.getLogger('gnana.%s' % __name__)
@@ -57,7 +59,8 @@ class GnanaAuthenticationForm(AuthenticationForm):
             t = Tenant.getByName(tenant)
             if t:
                 with NewSecContext(username, tenant, tenant):
-                    user = User.getUserByLogin(username)
+                    with AuthenticationPostgresContext(tenant):
+                        user = User.getUserByLogin(username)
                     if user and user.account_locked:
                         raise ValidationError("User Account Locked!")
         return super(GnanaAuthenticationForm, self).clean()
@@ -123,10 +126,14 @@ def base_validations(request, **kwargs):
             raise ForbiddenError("Not Authorized")
         else:
             try:
-                auth_token_obj = AuthorizationToken.getBySpecifiedCriteria({
-                    'object.token': auth_token,
-                    "object.source_tenant": sec_context.details.name
-                })
+                # authorization_tokens is kept per stack: read this tenant's
+                # token from the stack it is on, not the fixed database.
+                source_tenant = sec_context.details.name
+                with TenantStackPostgresContext(source_tenant):
+                    auth_token_obj = AuthorizationToken.getBySpecifiedCriteria({
+                        'object.token': auth_token,
+                        "object.source_tenant": source_tenant
+                    })
             except:
                 auth_token_obj = None
 
@@ -168,7 +175,10 @@ def protect_post(request, **kwargs):
 
         from aviso.domainmodel.auth_tokens import AuthorizationToken
         try:
-            auth_token_obj = AuthorizationToken.getByFieldValue("token", auth_token)
+            # authorization_tokens is kept per stack: read the token from the
+            # stack of the tenant this request is running as.
+            with TenantStackPostgresContext(sec_context.name):
+                auth_token_obj = AuthorizationToken.getByFieldValue("token", auth_token)
             is_primary = auth_token_obj.primary_tenant
         except:
             # Probably table is not there!!
@@ -470,6 +480,17 @@ class AvisoView(View):
 
         # If response is already a dict with status/body, return it
         if isinstance(response, dict) and 'status' in response:
+            return response
+
+        # If the response is already HttpResponse, we have nothing else to do.
+        # Allows the views to override default responses for special cases.
+        # service-infrastructure/aviso/framework/views.py documents this on
+        # AvisoView -- "If get, post or any validation responds with a
+        # HttpResponse, that response is simply passed back" -- and every
+        # HttpResponseNotFound / HttpResponseForbidden a view returns depends
+        # on it. Without it they fall through to json.dumps below, which cannot
+        # serialize a response object, so a deliberate 403 leaves as a 500.
+        if isinstance(response, (HttpResponse, StreamingHttpResponse)):
             return response
 
         if self.as_redirect:

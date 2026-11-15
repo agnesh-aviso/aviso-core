@@ -186,11 +186,18 @@ class PrepareSdkTest(SimpleTestCase):
 def _root_urlconf_imports():
     """Whether the root URLConf can be loaded in this environment.
 
-    accounts/views.py imports aviso.domainmodel.tenant, which imports pyschema
-    (pinned at 2.4.0 in requirements.txt). That release is Python 2 only -- its
-    core module does `from itertools import izip` -- so on 3.11 the root
-    URLConf cannot be built and no view is reachable. Anything using the test
-    client is skipped rather than left to fail, or worse hang, on that.
+    TODO: the reason below no longer applies. pyschema 2.4.0 has been dropped
+    from requirements.txt and Aviso's own schema library is vendored at
+    aviso/utils/pyschema.py in aviso-infrastructure, so the root URLConf should
+    import cleanly again. This is a runtime probe, so SdkEndpointTest un-skips
+    itself once that holds -- confirm it actually runs, then delete the probe and
+    the skipUnless below.
+
+    Historical reason: accounts/views.py imports aviso.domainmodel.tenant, which
+    imported pyschema (pinned at 2.4.0 in requirements.txt). That release is
+    Python 2 only -- its core module does `from itertools import izip` -- so on
+    3.11 the root URLConf cannot be built and no view is reachable. Anything
+    using the test client is skipped rather than left to fail, or worse hang.
     """
     try:
         import_module(settings.ROOT_URLCONF)

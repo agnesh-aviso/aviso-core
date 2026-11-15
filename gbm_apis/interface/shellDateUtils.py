@@ -451,9 +451,9 @@ class PeriodInfo(object):
 
         def current_period_(self, shell, epoch_time=None, period_type='Q'):
             if epoch_time:
-                ret = shell.api('/date/current?type=%s&as_of=%s' % (period_type, epoch_time), None)
+                ret = shell.api('/gbm/date/current?type=%s&as_of=%s' % (period_type, epoch_time), None)
             else:
-                ret = shell.api('/date/current?type=%s' % period_type, None)
+                ret = shell.api('/gbm/date/current?type=%s' % period_type, None)
 
             if ret and '_error' not in ret:
                 return ret[0]
@@ -463,10 +463,10 @@ class PeriodInfo(object):
 
         def next_period_(self, shell, epoch_time=None, period_type='Q', skip=1, count=1):
             if epoch_time:
-                ret = shell.api('/date/next?type=%s&as_of=%s&skip=%s&count=%s' % (period_type, epoch_time, skip, count
+                ret = shell.api('/gbm/date/next?type=%s&as_of=%s&skip=%s&count=%s' % (period_type, epoch_time, skip, count
                                                                                   ), None)
             else:
-                ret = shell.api('/date/next?type=%s&skip=%s&count=%s' % (period_type, skip, count), None)
+                ret = shell.api('/gbm/date/next?type=%s&skip=%s&count=%s' % (period_type, skip, count), None)
 
             if isinstance(ret, dict) and '_error' in ret:
                 print(ret)
@@ -474,10 +474,10 @@ class PeriodInfo(object):
 
         def prev_period_(self, shell, epoch_time=None, period_type='Q', skip=1, count=1):
             if epoch_time:
-                ret = shell.api('/date/prev?type=%s&as_of=%s&skip=%s&count=%s' %
+                ret = shell.api('/gbm/date/prev?type=%s&as_of=%s&skip=%s&count=%s' %
                                 (period_type, epoch_time, skip, count), None)
             else:
-                ret = shell.api('/date/prev?type=%s&skip=%s&count=%s' % (period_type, skip, count), None)
+                ret = shell.api('/gbm/date/prev?type=%s&skip=%s&count=%s' % (period_type, skip, count), None)
 
             if isinstance(ret, dict) and '_error' in ret:
                 print (ret)

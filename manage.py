@@ -1,5 +1,12 @@
 #!/usr/bin/env python
 """Django's command-line utility for administrative tasks."""
+# TODO: remove this whole shim -- see the matching note in aviso_core/wsgi.py.
+# It exists only to make the PyPI `pyschema==2.4.0` (Spotify's Avro library,
+# Python 2 only) importable under Python 3. That package is no longer a
+# dependency: Aviso's schema library is vendored at aviso/utils/pyschema.py in
+# aviso-infrastructure. The block below is guarded on
+# `submodule_search_locations`, which is None for the vendored module, so it is
+# already unreachable.
 import itertools
 if not hasattr(itertools, "izip"):
     itertools.izip = zip

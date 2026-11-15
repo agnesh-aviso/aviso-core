@@ -20,6 +20,9 @@ import logging
 from django.contrib import admin
 from django.urls import path, include, re_path
 
+from gbm_apis.api.auth_tokens import (GetAuthorizationTokenDetails,
+                                      SetAuthenticationToken)
+
 
 logger = logging.getLogger(f'gnana.{__name__}')
 
@@ -27,4 +30,9 @@ urlpatterns = [
     path('gbm/', include('gbm_apis.urls')),
     path('sdk/', include('sdk.urls')),
     path('', include('accounts.urls')),
+    # Token registration for tenant onboarding. At the root, not under /gbm/:
+    # the onboarding tool calls shell.api('/set_auth_token', ...) and
+    # shell.api('/get_auth_token', None), the paths the legacy service used.
+    path('set_auth_token', SetAuthenticationToken.as_view(), name='set_auth_token'),
+    path('get_auth_token', GetAuthorizationTokenDetails.as_view(), name='get_auth_token'),
 ]
