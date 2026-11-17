@@ -216,12 +216,20 @@ WhiteNoise. Everything about git and the config repositories is uncommitted.
   owned by the non-root user; adds a small `GIT_ASKPASS` helper so the
   repository token is never written into `.git/config`; makes `/app/static`
   writable so the SDK package can be built; sets the entrypoint.
-- `docker-entrypoint.sh`: after `preparesdk`, when `mode=production` or
-  `BACKUP_CONFIG=True`, clones one tenant-config repository per stack listed in
-  `CONFIG_REPO_STACKS` into `$CONFIG_REPO/<stack>`. The URL for a stack comes
-  from `<STACK>_CONFIG_REPO_URL` (`gbm1-ms` gives `GBM1_MS_CONFIG_REPO_URL`),
-  the branch from `CONFIG_REPO_BRANCH` (default `master`). A missing variable
-  or a failed clone stops the task on purpose.
+- `docker-entrypoint.sh`: after `preparesdk`, when `BACKUP_CONFIG=True`,
+  clones one tenant-config repository per stack listed in `CONFIG_REPO_STACKS`
+  into `$CONFIG_REPO/<stack>`. The URL for a stack comes from
+  `<STACK>_CONFIG_REPO_URL` (`gbm1-ms` gives `GBM1_MS_CONFIG_REPO_URL`), the
+  branch from `CONFIG_REPO_BRANCH` (default `master`). A missing variable or a
+  failed clone stops the task on purpose. `BACKUP_CONFIG` is the only switch,
+  in every mode, and it is the same one aviso's `fileUtils` checks before a
+  backup. It is on only for `BACKUP_CONFIG=True` exactly: the entrypoint's
+  `is_backup_on` and aviso's `is_backup_on()` apply the same rule, so the clone
+  and the backups never disagree. Anything else, unset included, is off; an
+  unexpected value such as `true` logs a warning and the server still starts.
+  With it off the task needs no repository, token or GitHub access, config
+  saves skip the backup without an error, and a production task logs a warning
+  at startup.
 - `.dockerignore` excludes `.env`; `.gitignore` excludes the built SDK package.
 - `requirements.txt`: `aviso==0.1.13` and `pyschema` removed (U); `whitenoise`
   added (C). The last commit still pins `aviso==0.1.15`.
@@ -235,6 +243,8 @@ Environment variables to add before this image is deployed (names only):
 
 | Variable | Purpose |
 | --- | --- |
+| `SECRET_KEY` | **Required.** Django's secret key, which signs the session cookies. Same value that used to be hard-coded in `aviso_core/settings.py`. Put it in the S3 `.env` **unquoted** (ECS keeps quotes as part of the value); the local `.env` has it single-quoted, which dotenv and docker compose both strip. Without it the task exits at startup |
+| `BACKUP_CONFIG` | `True` turns the tenant-config git backup on; anything else, unset included, leaves it off (an unexpected value logs a warning). The four `CONFIG_REPO_*` variables below are needed only when it is `True` |
 | `CONFIG_REPO_STACKS` | Comma-separated stacks to back up, for example `gbm1-ms,gbm2-ms` |
 | `<STACK>_CONFIG_REPO_URL` | One per listed stack |
 | `CONFIG_REPO_TOKEN` | Read access and push access to those repositories |
@@ -242,8 +252,9 @@ Environment variables to add before this image is deployed (names only):
 | `GBM1_MS_PG_DB_CONNECTION_URL`, `GBM2_MS_PG_DB_CONNECTION_URL` | Now required for tenants on each stack, with no fallback |
 | `TOKEN_CACHE_TTL` | Optional; seconds an `Access-Token` lookup is cached |
 
-With `mode=production`, a task without `CONFIG_REPO_STACKS` exits at startup.
-The variables must be in place before the image is deployed.
+With `BACKUP_CONFIG=True`, a task without `CONFIG_REPO_STACKS`, a stack's URL
+or a reachable repository exits at startup, so set those before switching it
+on. `mode=production` no longer turns the backup on by itself.
 
 ### 3.7 Tests and docs (C, with U and N additions)
 

@@ -13,6 +13,8 @@ import os
 import threading
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -20,8 +22,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-1b=+=%i&v#ppg*cm)4gxo*88z)k*$4&wk^-%t7m%b=t3-=9&0e'
+# Signs the session cookies (SESSION_ENGINE below), so whoever holds it can
+# forge a session for any user. Read from the environment -- .env locally
+# (manage.py loads it), the S3 .env on QA and prod -- never from the code.
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    raise ImproperlyConfigured(
+        'SECRET_KEY is not set. Add it to the environment: .env locally, '
+        'the S3 .env for QA and prod.')
 
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 # --- LOGIC FOR ALLOWED HOSTS ---

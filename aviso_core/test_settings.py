@@ -3,9 +3,14 @@
 Keeps the real middleware, urls and auth wiring, but puts Django's own tables
 in an in-memory sqlite so the suite needs no Postgres.
 """
+import os
 import tempfile
 
-from aviso_core.settings import *  # noqa: F401,F403
+# Before the import below, which refuses to load without it. manage.py has
+# usually loaded the real one from .env already; this only fills the gap.
+os.environ.setdefault('SECRET_KEY', 'test-only-not-a-real-secret-key')
+
+from aviso_core.settings import *  # noqa: E402,F401,F403
 from aviso_core.settings import MIDDLEWARE as _MIDDLEWARE
 
 DEBUG = False

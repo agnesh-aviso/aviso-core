@@ -12,7 +12,15 @@ them land here as the remaining GBM APIs are migrated.
 import json
 import logging
 import os
-from urllib.parse import urlencode
+
+import six
+
+# SDK clients still run Python 2, so this has to import under both. Same guard
+# as data.py and ../interface/base.py.
+if six.PY2:
+    from urllib import urlencode
+else:
+    from urllib.parse import urlencode
 
 # Relative, not absolute: inside the SDK archive this module is
 # <prefix>.gbm_apis.sdk.shell and there is no top-level gbm_apis to import.

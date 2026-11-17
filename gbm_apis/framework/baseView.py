@@ -115,8 +115,9 @@ def base_validations(request, **kwargs):
         if sandbox == 'None':
             sandbox = None
         try:
-            # Replaced META with headers
-            auth_token = request.headers.get('HTTP_ACCESS_TOKEN')
+            # The header name, as accounts/context.py reads it. Legacy read
+            # request.META['HTTP_ACCESS_TOKEN']; request.headers has no such key.
+            auth_token = request.headers.get('Access-Token')
         except:
             auth_token = None
 
@@ -155,7 +156,8 @@ def protect_post(request, **kwargs):
     """This validation is added to the api's which needs to protect from
     unwanted changes to main data even with sandboox"""
     try:
-        auth_token = request.headers.get('HTTP_ACCESS_TOKEN')
+        # Same header as base_validations reads.
+        auth_token = request.headers.get('Access-Token')
     except KeyError as e:
         logger.warn("auth token is not available in request")
         auth_token = None
