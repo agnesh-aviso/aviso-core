@@ -82,15 +82,19 @@ def timezone(shell, tz_str, period_info=False):
     return shell._tz_name
 
 
-def tenant(shell, action, **kwargs):
+def tenant(shell, command, **kwargs):
     """The subset of the legacy tenant verb this service answers.
 
     Kept as a plain function rather than a BaseSDKFunction because
     ``Shell.me()`` calls ``tenant('get_config', ...)`` eagerly, and routing
     that through command metadata would make connect_sdk depend on a command
     this service does not serve.
+
+    The command is ``command``, not ``action``: set_config and set_flag take an
+    ``action=`` keyword of their own ('remove', ...), which a parameter named
+    action would collide with ("got multiple values for argument 'action'").
     """
-    if action == 'get_all_config':
+    if command == 'get_all_config':
         # /gbm/tenant/<name>/config, the legacy /tenant/<name>/config under
         # this app's mount. sandbox= asks for the sandboxed view of the same
         # config, which is the other half of the diff sandbox get_diff prints.
@@ -100,13 +104,19 @@ def tenant(shell, action, **kwargs):
             url += '?sandbox=%s' % sandbox
         return shell.api(url, None)
 
-    if action == 'get_config':
+    if command == 'get_config':
         return _get_config(shell, **kwargs)
 
-    if action == 'set_config':
+    if command == 'set_config':
         return _set_config(shell, **kwargs)
 
-    logger.info("tenant('%s') is not served by aviso-core", action)
+    if command == 'get_flag':
+        return _get_flag(shell, **kwargs)
+
+    if command == 'set_flag':
+        return _set_flag(shell, **kwargs)
+
+    logger.info("tenant('%s') is not served by aviso-core", command)
     return None
 
 
@@ -157,6 +167,33 @@ def _set_config(shell, category=None, config_name=None, value=None,
     # Posted as a JSON string: the session only sends dicts and lists as they
     # are, so a boolean or number value would otherwise not be posted at all.
     return shell.api(url + '?' + urlencode(params), json.dumps(value))
+
+
+def _flag_url(shell, category, config_name):
+    """/gbm/tenant/<name>/flag/<category>/<config_name>, legacy's flag path."""
+    if not category or not config_name:
+        raise Exception("Required arguments 'category' and 'config_name' are mandatory")
+    return '/'.join((TENANT_BASE_PATH, shell._tenant, 'flag', category,
+                     config_name))
+
+
+def _get_flag(shell, category=None, config_name=None, default=""):
+    """One flag. A missing flag comes back as ``default``, sent as text the way
+    legacy sent it -- so default=False returns the string "False"."""
+    url = _flag_url(shell, category, config_name)
+    return shell.api(url + '?' + urlencode({'default': default}), None)
+
+
+def _set_flag(shell, category=None, config_name=None, value=None,
+              action='save'):
+    """Set one flag, or with action='remove' delete it; returns the old value.
+
+    Flags are not sandboxed: the change is live at once. Posted as a JSON
+    string, like _set_config's value.
+    """
+    url = _flag_url(shell, category, config_name)
+    return shell.api(url + '?' + urlencode({'action': action}),
+                     json.dumps(value))
 
 
 shell_methods = {

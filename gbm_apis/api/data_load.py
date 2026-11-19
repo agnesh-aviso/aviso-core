@@ -530,7 +530,14 @@ class DataLoadAPIView(AvisoCompatibilityMixin, AvisoView):
     
     def _handle(self, request, id_list, *args, **kwargs):
         try:
-            tenant_name = request.headers.get("X-Tenant-Name")
+            # The tenant the middleware resolved, as deals_results uses it: a
+            # logged-in session's tenant, an Access-Token's, or for an
+            # Internal-Api-Key caller its X-Tenant-Name header. Reading the
+            # header here instead failed every session caller (the SDK sends
+            # none) and let one name a tenant other than its own.
+            tenant_name = sec_context.name
+            if tenant_name == 'N/A':
+                tenant_name = None
             stack = os.environ.get('STACK')
             gbm_stack = os.environ.get('GBM_STACK')
             pod = os.environ.get('POD')

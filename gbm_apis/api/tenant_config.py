@@ -1,6 +1,6 @@
 """The tenant config dump, ported from service-infrastructure/aviso/api/tenantmanager.py.
 
-Two views are served:
+Three views are served:
 
 - ``TenantConfigDump`` -- the whole config. The SDK reaches it as
   ``shell.tenant('get_all_config')``, which is what sandbox get_diff compares
@@ -9,14 +9,17 @@ Two views are served:
   reaches it as ``shell.tenant('get_config', ...)`` and
   ``shell.tenant('set_config', ...)``; current_period() depends on the read to
   find forecast/quarter_begins.
+- ``TenantFlag`` -- one flag, read and written. The SDK reaches it as
+  ``shell.tenant('get_flag', ...)`` and ``shell.tenant('set_flag', ...)``.
 
-The rest of legacy tenantmanager -- user management, flag writes, bulk_config,
+The rest of legacy tenantmanager -- user management, bulk_config,
 validate_config -- is not ported.
 """
 import json
 import logging
 
-from django.http import HttpResponseForbidden, HttpResponseNotFound
+from django.http import (HttpResponseBadRequest, HttpResponseForbidden,
+                         HttpResponseNotFound, JsonResponse)
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
@@ -189,3 +192,78 @@ class TenantConfig(AvisoCompatibilityMixin, AvisoView):
                         config_name, category, sandbox_name)
         recache_dataset_config(sandbox=sandbox_name)
         return old_config
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class TenantFlag(AvisoCompatibilityMixin, AvisoView):
+    """Read, set or remove one tenant flag; legacy's TenantFlag view.
+
+    Flags are kept in tenant_flags, apart from config (tenant_configs), and are
+    not sandboxed: a POST changes the live flag at once. aviso's postgresdb
+    routes tenant_flags to the context tenant's own GBM stack database
+    (STACK_SCOPED_COLLECTIONS), keyed by that stack's tenant row
+    (Tenant.stack_id). Refusing every tenant but the context one is what keeps
+    a request on its own tenant's rows.
+
+    GET returns the stored value. With ?default= a missing flag returns that
+    default -- as text, as legacy did; the SDK always sends one -- and without
+    it a missing flag is a 404.
+
+    POST stores the posted JSON as the new value, or with ?action=remove
+    deletes the flag, and returns the old value (null for a new flag).
+
+    Values go back as JsonResponse: a dict value with a 'status' key, returned
+    bare, would be taken by AvisoView for a ready-made response.
+    """
+
+    http_method_names = ['get', 'post']
+
+    restrict_to_roles = {AvisoView.Role.Administrator, AvisoView.Role.Gnacker}
+
+    def get(self, request, tenant_name=None,
+            category=None, config_name=None, *args, **kwargs):
+        if sec_context.name != tenant_name.lower():
+            return HttpResponseForbidden(
+                "Unauthorized to read the flags")
+        if request.GET.get('action'):
+            return HttpResponseForbidden(
+                "You can't specify action in GET.  Perhaps you want to POST??")
+        try:
+            value = sec_context.details.get_flag(
+                category, config_name, request.GET.get('default'))
+        except GnanaError:
+            # Tenant.get_flag's "Key Not Found!!!", raised when no default was
+            # given. Legacy caught KeyError here, which it never raises.
+            return _flag_not_found(category, config_name)
+        return JsonResponse(value, safe=False)
+
+    def post(self, request, tenant_name=None,
+             category=None, config_name=None, *args, **kwargs):
+        if sec_context.name != tenant_name.lower():
+            return HttpResponseForbidden(
+                "Unauthorized to change the flags")
+        tdetails = sec_context.details
+        action = request.GET.get('action', 'save')
+        if action == 'save':
+            try:
+                value = json.loads(request.read())
+            except ValueError:
+                return HttpResponseBadRequest("The flag value must be JSON")
+            old_value = tdetails.set_flag(category, config_name, value)
+        elif action == 'remove':
+            try:
+                old_value = tdetails.remove_flag(category, config_name)
+            except GnanaError:
+                return _flag_not_found(category, config_name)
+        else:
+            raise GnanaError("Unknown action")
+        logger.info("%s %s flag %s/%s",
+                    getattr(getattr(request, 'user', None), 'username', None),
+                    'updated' if action == 'save' else 'removed',
+                    category, config_name)
+        return JsonResponse(old_value, safe=False)
+
+
+def _flag_not_found(category, config_name):
+    return HttpResponseNotFound(
+        "No flag named: %s found for flag set: %s " % (config_name, category))

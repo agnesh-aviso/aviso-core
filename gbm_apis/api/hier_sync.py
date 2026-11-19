@@ -9,9 +9,11 @@ Same as legacy for every request legacy completes: the body is read raw (``reque
 ``DATA_UPLOAD_MAX_MEMORY_SIZE`` does not apply), then ``json.loads`` and ``sync_hierarchy``. Differences,
 all refusals that happen before the GBM DB is touched:
 
-* The tenant must be named explicitly (``X-Tenant-Name`` header, or the ``tenant_name`` query parameter,
-  the two sources the middleware reads). Without one, aviso-core's middleware silently uses
-  ``aviso.com``, and this endpoint would rewrite that tenant's hierarchy.
+* The tenant is the one the middleware resolved (``sec_context``), never read from the request here: a
+  session's tenant, a token's, or an Internal-Api-Key caller's ``X-Tenant-Name`` header (or ``tenant_name``
+  query parameter). The middleware has no default tenant, so a key request that names none is refused before
+  it gets here (it used to fall back to ``aviso.com``, which this endpoint would then have rewritten). A
+  header or parameter sent with a session cannot point the rewrite at another tenant.
 * A body that is not JSON, or a payload that legacy would only fail on after dropping the collection
   (see ``sync_service.validate_hier_records``), gets a 400 and nothing is written. Legacy answered 500,
   and for the payload cases only after the drop.
@@ -53,10 +55,11 @@ class HierarchySyncAPIView(AvisoCompatibilityMixin, AvisoView):
     as_json = False
 
     def post(self, request, *args, **kwargs):
-        # Refuse when the middleware fell back to its default tenant (no header and no query parameter).
-        tenant = request.headers.get('X-Tenant-Name') or request.GET.get('tenant_name')
-        if not tenant or tenant != sec_context.name:
-            return _bad_request('X-Tenant-Name header is required: hier_sync rewrites that tenant\'s GBM hierarchy')
+        # The tenant the middleware resolved for this caller (accounts.context): a key caller must name it
+        # in X-Tenant-Name, and a session caller's header is ignored.
+        tenant = sec_context.name
+        if not tenant or tenant == 'N/A':
+            return _bad_request('no tenant for this request: hier_sync rewrites a tenant\'s GBM hierarchy')
         try:
             decoded = json.loads(request.read())
         except ValueError as e:     # JSONDecodeError, or a body that is not UTF-8/16/32

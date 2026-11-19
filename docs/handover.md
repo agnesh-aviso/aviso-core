@@ -115,6 +115,15 @@ Design points:
    taken from `X-Tenant-Name`. Still supported; intended to be removed once the
    remaining callers move off it.
 
+Each caller's tenant comes from its own source only, and they never mix: a
+session caller's `X-Tenant-Name` and `?tenant_name=` are ignored, and a key
+caller must name its tenant with `X-Tenant-Name` or `?tenant_name=`. There is
+no default tenant (a key request naming neither used to run against
+`aviso.com`; now it gets a 401). Views read the tenant from `sec_context`,
+never from the request: `basic_results` and `hier_sync` used to read the
+header themselves, which failed session callers and let them name another
+tenant.
+
 `aviso_core/middlewares.py` calls this for every path except a short list of
 anonymous ones (`/csrfform`, `/account/login`, `/account/logout`,
 `/loginswitchbypass`, `/sdk/version`, `/sdk/latest`, `/account/validate_ip`),
@@ -180,10 +189,15 @@ Notes on these:
   the legacy service used, not through this repository's own `Dataset` fork.
   The comment at the top of `gbm_apis/dataset/datasetdesigner.py` explains what
   the fork got wrong for this purpose.
+- Tenant flags: `tenant('get_flag', ...)` and `tenant('set_flag', ...)` reach
+  `GET`/`POST /gbm/tenant/<name>/flag/<category>/<config_name>`, legacy's
+  `TenantFlag`. Flags live in `tenant_flags`, apart from config
+  (`tenant_configs`), are not sandboxed (a `POST` is live at once), and are
+  read and written in the request tenant's own GBM stack database.
 - **Deliberately not ported**, with the reason recorded in each module's
   docstring: dataset `list` and `indexes`; sandbox `purge`, `resync`,
-  `clear_data`, `list_stale`; tenant user management, flag writes,
-  `bulk_config`, `validate_config`; date `shift`; token listing and removal.
+  `clear_data`, `list_stale`; tenant user management, `bulk_config`,
+  `validate_config`; date `shift`; token listing and removal.
 - `get_auth_token` returns the tenant's stack as `stack`, where the legacy
   service returned its `CNAME`. Whether those are the same string in production
   has not been compared yet.

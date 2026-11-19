@@ -39,7 +39,8 @@ from aviso.framework import tenant_holder  # noqa: E402
 from aviso.framework.connection_factory import ConnectionFactory  # noqa: E402
 from aviso.settings import sec_context  # noqa: E402
 
-import aviso_core.middlewares as middlewares  # noqa: E402
+import accounts.context as accounts_context  # noqa: E402
+import gbm_apis.api.hier_sync as hier_sync_view  # noqa: E402
 import gbm_apis.hierarchy_sync.sync_service as sync_service  # noqa: E402
 from gbm_apis.api.hier_sync import HierarchySyncAPIView  # noqa: E402
 from gbm_apis.framework.baseView import protect_post  # noqa: E402
@@ -440,24 +441,28 @@ def test_view_reads_the_raw_body_like_legacy(gbm):
     assert _without_id(_stored(dbs[TENANT])) == RICH
 
 
-def test_view_accepts_the_tenant_name_query_parameter(gbm):
+def test_view_syncs_the_request_context_tenant_without_a_header(gbm):
+    """A session caller sends no X-Tenant-Name; the tenant is the one the middleware resolved."""
     dbs, calls = gbm
-    response = _post(RICH, path="/gbm/hier_sync?tenant_name=%s" % TENANT, tenant=None)
+    response = _post(RICH, tenant=None)
     assert response.status_code == 200 and calls == [(TENANT, "gbm", CNAME)]
 
 
-@pytest.mark.parametrize("tenant", [None, ""])
-def test_view_refuses_without_an_explicit_tenant(gbm, tenant):
-    dbs, calls = gbm
-    response = _post(RICH, tenant=tenant)
-    assert response.status_code == 400 and "X-Tenant-Name" in json.loads(response.content)["error"]
-    assert calls == [] and dbs == {}
-
-
-def test_view_refuses_a_tenant_other_than_the_request_context(gbm):
+def test_view_ignores_a_header_naming_another_tenant(gbm):
+    """The header cannot point the rewrite at a tenant other than the request's."""
     dbs, calls = gbm
     response = _post(RICH, tenant="other.com")
-    assert response.status_code == 400 and calls == [] and dbs == {}
+    assert response.status_code == 200 and calls == [(TENANT, "gbm", CNAME)]
+    assert "other.com" not in dbs
+
+
+@pytest.mark.parametrize("no_tenant", [None, "", "N/A"])
+def test_view_refuses_when_the_request_has_no_tenant(gbm, no_tenant):
+    dbs, calls = gbm
+    with mock.patch.object(hier_sync_view, "sec_context", types.SimpleNamespace(name=no_tenant)):
+        response = _post(RICH)
+    assert response.status_code == 400 and "no tenant" in json.loads(response.content)["error"]
+    assert calls == [] and dbs == {}
 
 
 @pytest.mark.parametrize("body", [b"", b"not json", b"[{\"node\": ", b"\xff\xfe\xfa", b"{'node': 'a'}"])
@@ -507,7 +512,8 @@ def stack_env(monkeypatch):
     """What the deployment provides: the API key, and the user the middleware sets the context with
     (MICROSERVICES_USER, read by aviso.settings at import)."""
     monkeypatch.setenv("INTERNAL_API_KEY", API_KEY)
-    monkeypatch.setattr(middlewares, "microservices_user", "unit-test-microservice-user")
+    # accounts.context resolves the Internal-Api-Key caller now; the middleware module no longer has it.
+    monkeypatch.setattr(accounts_context, "microservices_user", "unit-test-microservice-user")
     with override_settings(ALLOWED_HOSTS=["testserver"]):
         yield
 
@@ -543,11 +549,20 @@ def test_full_stack_csrf_does_not_block(gbm, stack_env):
 
 
 def test_full_stack_without_tenant_header_does_not_sync_the_default_tenant(gbm, client):
-    """aviso-core's middleware falls back to aviso.com when X-Tenant-Name is missing (requests drops a header
-    whose value is None). hier_sync must refuse instead of rewriting aviso.com's hierarchy."""
+    """An Internal-Api-Key caller must name its tenant, in X-Tenant-Name or ?tenant_name= (requests drops a
+    header whose value is None). The middleware used to fall back to aviso.com; now it refuses, before any view
+    runs."""
     dbs, calls = gbm
     response = _stack_post(client, json.dumps(RICH), tenant=None)
-    assert response.status_code == 400 and calls == [] and dbs == {}
+    assert response.status_code == 401 and calls == [] and dbs == {}
+
+
+def test_full_stack_accepts_the_tenant_name_query_parameter(gbm, client):
+    """A key caller may name its tenant with ?tenant_name= instead of the header."""
+    dbs, calls = gbm
+    response = _stack_post(client, json.dumps(RICH), path="/gbm/hier_sync?tenant_name=%s" % TENANT,
+                           tenant=None)
+    assert response.status_code == 200 and calls == [(TENANT, "gbm", CNAME)]
 
 
 @pytest.mark.parametrize("key", [None, "wrong"])

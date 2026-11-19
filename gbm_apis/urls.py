@@ -8,7 +8,7 @@ from gbm_apis.api.health import HealthCheckView
 from gbm_apis.api.hier_metadata import HierarchyMetadataAPIView
 from gbm_apis.api.hier_sync import HierarchySyncAPIView
 from gbm_apis.api.sandbox_manager import CommitSandbox, ListSandbox
-from gbm_apis.api.tenant_config import TenantConfig, TenantConfigDump
+from gbm_apis.api.tenant_config import TenantConfig, TenantConfigDump, TenantFlag
 from gbm_apis.dataset.datasetdesigner import DatasetUpdate, DatasetView
 
 app_name = 'gbm_apis'
@@ -17,9 +17,12 @@ app_name = 'gbm_apis'
 ## TODO: Health Check Implementation
 ## TODO: TraceId Propagation- Middleware
 urlpatterns = [
-    path('v2/drilldown_fields/', DrilldownFieldsV2.as_view(), name='drilldown_fields_v2'),
+    # POST only. Callers post to /gbm/v2/drilldown_fields?period=... without a trailing slash,
+    # and a POST can't follow the slash-append redirect.
+    re_path(r'^v2/drilldown_fields/?$', DrilldownFieldsV2.as_view(), name='drilldown_fields_v2'),
     re_path('basic_results/?$', DataLoadAPIView.as_view(), name='basic_results'),
-    path('deals_results/', DealsResultsAPIView.as_view(), name='deals_results'),
+    # GET and POST. Callers use /gbm/deals_results?period=... without a trailing slash, as on legacy.
+    re_path(r'^deals_results/?$', DealsResultsAPIView.as_view(), name='deals_results'),
     # No trailing slash required: the jobs call /gbm/forecast_results?period=... (as legacy), and a
     # slash-append redirect would be an extra hop for them.
     re_path(r'^forecast_results/?$', ForecastResultsAPIView.as_view(), name='forecast_results'),
@@ -43,6 +46,10 @@ urlpatterns = [
     # One entry of that config: GET reads it, POST saves or removes it.
     re_path(r'^tenant/(?P<tenant_name>[\w.]+)/config/(?P<category>[\w.]+)/(?P<config_name>[\w.]+)$',
             TenantConfig.as_view(), name='tenant_config_item'),
+    # One flag (tenant_flags, not config): GET reads it, POST saves or removes
+    # it. Legacy /tenant/<name>/flag/<category>/<config_name>.
+    re_path(r'^tenant/(?P<tenant_name>[\w.]+)/flag/(?P<category>[\w.]+)/(?P<config_name>[\w.]+)$',
+            TenantFlag.as_view(), name='tenant_flag'),
     # Period boundaries. All three are registered together because the SDK's
     # PeriodInfo cache is built from current + prev + next on the first call,
     # so current_period() alone still reaches /date/next.

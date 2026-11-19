@@ -9,6 +9,13 @@ Three ways in, tried in this order:
    caller, with the tenant taken from a request header. Removed once the
    remaining callers move off it.
 
+Each way takes the tenant from its own source and nothing else: the session's
+tenant, the token's tenant, or for the internal key the ``X-Tenant-Name``
+header (or ``?tenant_name=``). A session caller's X-Tenant-Name and
+tenant_name are ignored, and a key caller naming neither is refused rather than
+given a default tenant. Views read the tenant from sec_context, never from the
+request.
+
 Ported from service-infrastructure/aviso/framework/middleware.py.
 """
 import json
@@ -178,12 +185,22 @@ def from_token(request, auth_token):
 
 
 def from_internal_api_key(request, internal_api_key):
-    """Legacy path: one shared secret, tenant supplied by the caller."""
+    """Legacy path: one shared secret, tenant named by the caller.
+
+    The X-Tenant-Name header, or the tenant_name query parameter. No default:
+    a key caller that names no tenant is refused (401) rather than run against
+    some other tenant -- this used to fall back to aviso.com, which hier_sync,
+    a write, had to guard against on its own.
+    """
     if internal_api_key != os.environ.get('INTERNAL_API_KEY', ''):
         return None
 
     tenant_name = (request.headers.get('X-Tenant-Name')
-                   or request.GET.get('tenant_name', 'aviso.com'))
+                   or request.GET.get('tenant_name'))
+    if not tenant_name:
+        logger.warning('Internal-Api-Key request to %s without an X-Tenant-Name '
+                       'header or tenant_name parameter: refused', request.path)
+        return None
     sec_context.set_context(user_name=microservices_user,
                             tenant_name=tenant_name,
                             login_tenant_name=tenant_name,
