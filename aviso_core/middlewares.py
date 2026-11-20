@@ -58,6 +58,23 @@ def _release(tenant_name):
                 if hasattr(tl, "tenant_used_for_stack_pg_db"):
                     del tl.tenant_used_for_stack_pg_db
 
+            # The tenant's own Postgres user, which DDL on its tables runs as
+            # (aviso's postgresdb.__ddl_connection_for__); opened only by a
+            # request that runs DDL. reset_context() only drops the reference,
+            # so without this it would stay open until the worker's next
+            # request -- and it is never reused across requests, so closing it
+            # here costs nothing.
+            if hasattr(tl, "postgres_db"):
+                owner_conn = tl.postgres_db
+                if owner_conn is not None:
+                    try:
+                        owner_conn.close()
+                    except Exception as e:
+                        logger.info("Failed to close tenant owner Postgres connection: %s", e)
+                del tl.postgres_db
+            if hasattr(tl, "tenant_used_for_pg_db"):
+                del tl.tenant_used_for_pg_db
+
             db_map = getattr(tl, "tenant_db_map", None)
             if db_map:
                 for tenant, db in list(db_map.items()):
